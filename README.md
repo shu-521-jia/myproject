@@ -6,7 +6,7 @@
 
 本仓库收录了我在学习与实战中独立开发的各类网络安全工具，涵盖 Web 漏洞利用、内网渗透、流量分析、自动化扫描​ 等方向。
 
-工具均使用 Python​ 开发，部分基于 requests、scapy、pynput、paramiko等库实现，已在 DVWA、Vulhub、红日安全靶场​ 等环境中验证可用性。
+工具均使用 Python​ 开发，部分基于 requests、scapy、pynput、paramiko等库实现。
 
 # 项目列表
 ## 一、Web 漏洞利用工具
