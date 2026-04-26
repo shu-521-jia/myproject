@@ -26,7 +26,7 @@
 
 
 
-对应文件：test_bak3.py
+对应文件：test_bak3.py time_blind_injection.py
 
 
 ### 登录爆破工具​
@@ -39,7 +39,7 @@
 
 ThreadPoolExecutor、随机 UA、失败/成功逻辑判断
 
-对应文件：
+对应文件：Brute_force2.py
 
 
 ### 目录扫描工具​
